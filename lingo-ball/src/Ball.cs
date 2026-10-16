@@ -17,7 +17,12 @@ namespace LingoBall
         readonly Timer anim = new Timer { Interval = 40 };
         Point downScreen, downLoc;
         bool down, dragged;
-        int size;
+        int size, fullSize, miniSize;
+        // edge docking (like 360's floating ball): 0 none, -1 left, 1 right
+        int dock;
+        bool collapsed;
+        public bool EdgeHide = true;
+        readonly Timer collapseTimer = new Timer { Interval = 1200 };
         string skin = "glass";
         Bitmap skinImg;
 
@@ -49,8 +54,10 @@ namespace LingoBall
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            size = Scale(60);
+            size = fullSize = Scale(60);
+            miniSize = Scale(34);
             Size = new Size(size, size);
+            collapseTimer.Tick += (s, e) => { collapseTimer.Stop(); if (!hover && !down) Collapse(); };
             anim.Tick += (s, e) => { spin = (spin + 12) % 360; Render(); };
         }
 
@@ -81,12 +88,66 @@ namespace LingoBall
         protected override void OnShown(EventArgs e) { base.OnShown(e); Render(); }
         protected override void OnLocationChanged(EventArgs e) { base.OnLocationChanged(e); if (IsHandleCreated) Render(); }
 
-        protected override void OnMouseEnter(EventArgs e) { hover = true; Render(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { hover = false; Render(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; collapseTimer.Stop(); if (collapsed) Expand(); else Render(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Render(); ArmCollapse(); base.OnMouseLeave(e); }
+
+        void ArmCollapse() { collapseTimer.Stop(); if (EdgeHide && dock != 0 && !collapsed && Visible) collapseTimer.Start(); }
+
+        Rectangle WorkArea => Screen.FromPoint(new Point(Left + Width / 2, Top + Height / 2)).WorkingArea;
+
+        /// <summary>Shrink to a small icon tucked into the screen edge.</summary>
+        void Collapse()
+        {
+            if (dock == 0 || collapsed) return;
+            var wa = WorkArea;
+            int cy = Top + Height / 2;
+            collapsed = true;
+            size = miniSize;
+            int x = dock > 0 ? wa.Right - (int)(size * 0.62) : wa.Left - (int)(size * 0.38);
+            Bounds = new Rectangle(x, cy - size / 2, size, size);
+            Render();
+        }
+
+        void Expand()
+        {
+            if (!collapsed) return;
+            var wa = WorkArea;
+            int cy = Top + Height / 2;
+            collapsed = false;
+            size = fullSize;
+            int x = dock > 0 ? wa.Right - size - Scale(4) : wa.Left + Scale(4);
+            int y = Math.Max(wa.Top, Math.Min(cy - size / 2, wa.Bottom - size));
+            Bounds = new Rectangle(x, y, size, size);
+            Render();
+        }
+
+        /// <summary>Full-size position (for saving), even while collapsed.</summary>
+        public Point HomeLocation
+        {
+            get
+            {
+                if (!collapsed) return Location;
+                var wa = WorkArea; int cy = Top + Height / 2;
+                return new Point(dock > 0 ? wa.Right - fullSize - Scale(4) : wa.Left + Scale(4), cy - fullSize / 2);
+            }
+        }
+
+        /// <summary>Re-evaluate docking after placement/settings change.</summary>
+        public void Redock()
+        {
+            if (collapsed) Expand();
+            SnapToScreen();
+            ArmCollapse();
+        }
+
+        public void SetEdgeHide(bool on) { EdgeHide = on; if (!on && collapsed) Expand(); else ArmCollapse(); }
+
+        /// <summary>Temporarily make sure the full ball is visible (e.g. when a window opens next to it).</summary>
+        public void Peek() { collapseTimer.Stop(); if (collapsed) Expand(); ArmCollapse(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left) { down = true; dragged = false; downScreen = Cursor.Position; downLoc = Location; }
+            if (e.Button == MouseButtons.Left) { if (collapsed) Expand(); down = true; dragged = false; downScreen = Cursor.Position; downLoc = Location; collapseTimer.Stop(); }
             base.OnMouseDown(e);
         }
 
@@ -107,7 +168,7 @@ namespace LingoBall
             if (e.Button == MouseButtons.Left && down)
             {
                 down = false;
-                if (dragged) { SnapToScreen(); Moved?.Invoke(); }
+                if (dragged) { SnapToScreen(); Moved?.Invoke(); ArmCollapse(); }
                 else Clicked?.Invoke();
             }
             else if (e.Button == MouseButtons.Right) RightClicked?.Invoke(Cursor.Position);
@@ -120,8 +181,9 @@ namespace LingoBall
             int x = Math.Max(wa.Left, Math.Min(Left, wa.Right - Width));
             int y = Math.Max(wa.Top, Math.Min(Top, wa.Bottom - Height));
             // stick to the nearest side edge when close
-            if (x - wa.Left < Scale(24)) x = wa.Left + Scale(4);
-            if (wa.Right - (x + Width) < Scale(24)) x = wa.Right - Width - Scale(4);
+            dock = 0;
+            if (x - wa.Left < Scale(24)) { x = wa.Left + Scale(4); dock = -1; }
+            if (wa.Right - (x + Width) < Scale(24)) { x = wa.Right - Width - Scale(4); dock = 1; }
             Location = new Point(x, y);
         }
 
