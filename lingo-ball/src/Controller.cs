@@ -23,6 +23,8 @@ namespace LingoBall
         readonly NotifyIcon tray = new NotifyIcon();
         readonly ContextMenuStrip menu = new ContextMenuStrip();
         PanelForm panel;
+        HarkWindow hark;
+        bool shooting;
         readonly AgentHost agent;
         readonly SynchronizationContext ui;
         readonly List<string> logBuf = new List<string>();
@@ -59,11 +61,12 @@ namespace LingoBall
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) TogglePanel(); };
             tray.BalloonTipClicked += (s, e) => ShowPanel();
 
-            ball.Clicked += TogglePanel;
+            ball.Clicked += () => { if (cfg.ClickAction == "panel") TogglePanel(); else ToggleHark(); };
             ball.RightClicked += p => { BuildMenu(); menu.Show(p); };
-            ball.Moved += () => { cfg.BallX = ball.Left; cfg.BallY = ball.Top; cfg.Save(); };
+            ball.Moved += () => { var h = ball.HomeLocation; cfg.BallX = h.X; cfg.BallY = h.Y; cfg.Save(); };
+            ball.EdgeHide = cfg.EdgeHide;
             PlaceBall();
-            if (cfg.ShowBall) ball.Show();
+            if (cfg.ShowBall) { ball.Show(); ball.Redock(); }
 
             UpdateVisuals();
             if (string.IsNullOrEmpty(cfg.Root))
@@ -125,7 +128,82 @@ namespace LingoBall
             }
             return panel;
         }
-        void ShowPanel() { var p = Panel(); p.ShowNear(cfg.ShowBall && ball.Visible ? ball.Bounds : new Rectangle(Cursor.Position, new Size(1, 1))); }
+        Rectangle Anchor() { if (cfg.ShowBall && ball.Visible) { ball.Peek(); return ball.Bounds; } return new Rectangle(Cursor.Position, new Size(1, 1)); }
+        void ShowPanel() { var p = Panel(); p.ShowNear(Anchor()); }
+
+        // ---------- Hark mini window ----------
+        HarkWindow Hark()
+        {
+            if (hark == null || hark.IsDisposed)
+            {
+                hark = new HarkWindow(cfg);
+                hark.ScreenshotRequested += async () =>
+                {
+                    var bmp = await CaptureScreen();
+                    if (bmp == null) { hark.Hint("截屏失败"); return; }
+                    try { Clipboard.SetImage(bmp); hark.Hint("已复制截图，按 Ctrl+V 粘贴"); }
+                    catch (Exception e) { hark.Hint("复制失败"); Log.Write("截图复制失败: " + e.Message); }
+                    finally { bmp.Dispose(); }
+                };
+            }
+            return hark;
+        }
+        void ShowHark() { Hark().ShowNear(Anchor()); }
+        void ToggleHark() { var h = Hark(); if (h.Visible && h.WindowState != FormWindowState.Minimized && Form.ActiveForm == h) h.Hide(); else ShowHark(); }
+
+        /// <summary>Hide our own windows, grab the screen under the mouse, then restore.</summary>
+        async Task<Bitmap> CaptureScreen()
+        {
+            if (shooting) return null;
+            shooting = true;
+            var hidden = new List<Form>();
+            try
+            {
+                var scr = Screen.FromPoint(Cursor.Position);
+                foreach (Form f in new Form[] { ball, hark, panel })
+                    if (f != null && !f.IsDisposed && f.Visible) { f.Hide(); hidden.Add(f); }
+                await Task.Delay(hidden.Count > 0 ? 300 : 50);
+                var b = scr.Bounds;
+                var bmp = new Bitmap(b.Width, b.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(b.Location, Point.Empty, b.Size);
+                return bmp;
+            }
+            catch (Exception e) { Log.Write("截屏失败: " + e.Message); return null; }
+            finally
+            {
+                foreach (var f in hidden) { try { f.Show(); } catch { } }
+                if (hidden.Contains(ball)) ball.Redock();
+                shooting = false;
+            }
+        }
+
+        async void AgentScreenshot(object id)
+        {
+            var reply = new Dictionary<string, object> { ["t"] = "shot", ["id"] = id };
+            if (!cfg.AllowScreenshot) { reply["error"] = "用户关闭了截屏权限"; agent.Send(reply); return; }
+            var bmp = await CaptureScreen();
+            if (bmp == null) { reply["error"] = "截屏失败"; agent.Send(reply); return; }
+            try
+            {
+                int w = bmp.Width, h = bmp.Height;
+                double k = Math.Min(1.0, 1600.0 / Math.Max(w, h));
+                using (var small = new Bitmap(bmp, (int)(w * k), (int)(h * k)))
+                {
+                    var file = Path.Combine(Paths.Local, "screenshot.jpg");
+                    var codec = Array.Find(System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders(), c => c.MimeType == "image/jpeg");
+                    var ep = new System.Drawing.Imaging.EncoderParameters(1);
+                    ep.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 80L);
+                    small.Save(file, codec, ep);
+                    reply["path"] = file;
+                    reply["note"] = "屏幕 " + w + "×" + h + (k < 1 ? "，已缩小到 " + small.Width + "×" + small.Height : "");
+                }
+                Log.Write("AI 截取了一次屏幕");
+                tray.Text = Trunc("灵桥：AI 刚截取了屏幕", 63);
+            }
+            catch (Exception e) { reply["error"] = "保存截图失败: " + e.Message; }
+            finally { bmp.Dispose(); }
+            agent.Send(reply);
+        }
         void TogglePanel() { var p = Panel(); if (p.Visible && p.WindowState != FormWindowState.Minimized) p.Hide(); else ShowPanel(); }
         void PostPanel(object o) { if (panel != null && !panel.IsDisposed) panel.Post(Json.Serialize(o)); }
 
@@ -140,7 +218,7 @@ namespace LingoBall
                 ["allowWrite"] = cfg.AllowWrite, ["approveWrite"] = cfg.ApproveWrite,
                 ["allowCommand"] = cfg.AllowCommand, ["approveCommand"] = cfg.ApproveCommand,
                 ["autoConnect"] = cfg.AutoConnect, ["showBall"] = cfg.ShowBall, ["autoStartWin"] = AutoStartWin,
-                ["version"] = Version, ["autoUpdate"] = cfg.AutoUpdate, ["ballSkin"] = cfg.BallSkin,
+                ["version"] = Version, ["autoUpdate"] = cfg.AutoUpdate, ["ballSkin"] = cfg.BallSkin, ["edgeHide"] = cfg.EdgeHide, ["clickAction"] = cfg.ClickAction, ["allowScreenshot"] = cfg.AllowScreenshot,
                 ["update"] = update?.Version ?? "", ["updateMsg"] = updateMsg, ["updating"] = updating,
             });
         }
@@ -222,6 +300,9 @@ namespace LingoBall
                 case "autoStartWin": AutoStartWin = b; restart = false; break;
                 case "autoUpdate": cfg.AutoUpdate = b; restart = false; break;
                 case "ballSkin": cfg.BallSkin = v as string ?? "glass"; ApplySkin(); restart = false; break;
+                case "edgeHide": cfg.EdgeHide = b; ball.SetEdgeHide(b); restart = false; break;
+                case "clickAction": cfg.ClickAction = v as string ?? "hark"; restart = false; break;
+                case "allowScreenshot": cfg.AllowScreenshot = b; break;
                 default: return;
             }
             cfg.Save();
@@ -235,7 +316,8 @@ namespace LingoBall
             var head = new ToolStripMenuItem("灵桥 · " + StatusText()) { Enabled = false };
             menu.Items.Add(head);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("打开面板", null, (s, e) => ShowPanel());
+            menu.Items.Add("打开 Hark 对话", null, (s, e) => ShowHark());
+            menu.Items.Add("打开控制面板", null, (s, e) => ShowPanel());
             if (status == "on" || status == "starting" || status == "preparing") menu.Items.Add("停止", null, (s, e) => Stop());
             else menu.Items.Add("启动", null, (s, e) => Start());
             var copy = new ToolStripMenuItem("复制 MCP 地址", null, (s, e) => CopyUrl()) { Enabled = url != "" };
@@ -360,6 +442,7 @@ namespace LingoBall
                     break;
                 case "progress": Log.Write("AI 进度: " + ev["m"]); tray.Text = Trunc("AI: " + ev["m"], 63); break;
                 case "approve": approvals.Enqueue(ev); PumpApprovals(); break;
+                case "shot": AgentScreenshot(ev["id"]); break;
                 case "error": userStopped = true; Fail(ev["m"] as string); break;
             }
         }
