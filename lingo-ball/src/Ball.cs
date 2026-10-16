@@ -17,12 +17,15 @@ namespace LingoBall
         readonly Timer anim = new Timer { Interval = 40 };
         Point downScreen, downLoc;
         bool down, dragged;
-        int size, fullSize, miniSize;
-        // edge docking (like 360's floating ball): 0 none, -1 left, 1 right
-        int dock;
-        bool collapsed;
-        public bool EdgeHide = true;
-        readonly Timer collapseTimer = new Timer { Interval = 1200 };
+        int size, margin;
+        // ---- motion effects: click squash + water-drop stretch while dragging ----
+        readonly Timer fx = new Timer { Interval = 15 };
+        readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        double lastT;
+        float scale = 1f, scaleV, scaleTarget = 1f;       // click pulse (spring)
+        float stretch, stretchV;                            // drag deformation (spring)
+        float velX, velY, dirAngle;                         // smoothed drag velocity, px/s
+        PointF lastPos; bool hasLast;
         string skin = "glass";
         Bitmap skinImg;
 
@@ -54,10 +57,10 @@ namespace LingoBall
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            size = fullSize = Scale(60);
-            miniSize = Scale(34);
-            Size = new Size(size, size);
-            collapseTimer.Tick += (s, e) => { collapseTimer.Stop(); if (!hover && !down) Collapse(); };
+            size = Scale(60);
+            margin = Scale(20);
+            Size = new Size(size + margin * 2, size + margin * 2);
+            fx.Tick += (s, e) => StepFx();
             anim.Tick += (s, e) => { spin = (spin + 12) % 360; Render(); };
         }
 
@@ -88,66 +91,50 @@ namespace LingoBall
         protected override void OnShown(EventArgs e) { base.OnShown(e); Render(); }
         protected override void OnLocationChanged(EventArgs e) { base.OnLocationChanged(e); if (IsHandleCreated) Render(); }
 
-        protected override void OnMouseEnter(EventArgs e) { hover = true; collapseTimer.Stop(); if (collapsed) Expand(); else Render(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { hover = false; Render(); ArmCollapse(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Render(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Render(); base.OnMouseLeave(e); }
 
-        void ArmCollapse() { collapseTimer.Stop(); if (EdgeHide && dock != 0 && !collapsed && Visible) collapseTimer.Start(); }
+        /// <summary>The ball itself on screen (the window has a transparent margin for the effects).</summary>
+        public Rectangle BallBounds => new Rectangle(Left + margin, Top + margin, size, size);
+        public int Margin2 => margin;
 
-        Rectangle WorkArea => Screen.FromPoint(new Point(Left + Width / 2, Top + Height / 2)).WorkingArea;
+        void Kick() { if (!fx.Enabled) { lastT = clock.Elapsed.TotalSeconds; hasLast = false; fx.Start(); } }
 
-        /// <summary>Shrink to a small icon tucked into the screen edge.</summary>
-        void Collapse()
+        void StepFx()
         {
-            if (dock == 0 || collapsed) return;
-            var wa = WorkArea;
-            int cy = Top + Height / 2;
-            collapsed = true;
-            size = miniSize;
-            int x = dock > 0 ? wa.Right - (int)(size * 0.62) : wa.Left - (int)(size * 0.38);
-            Bounds = new Rectangle(x, cy - size / 2, size, size);
-            Render();
-        }
+            double now = clock.Elapsed.TotalSeconds;
+            float dt = (float)Math.Min(0.05, Math.Max(0.001, now - lastT));
+            lastT = now;
 
-        void Expand()
-        {
-            if (!collapsed) return;
-            var wa = WorkArea;
-            int cy = Top + Height / 2;
-            collapsed = false;
-            size = fullSize;
-            int x = dock > 0 ? wa.Right - size - Scale(4) : wa.Left + Scale(4);
-            int y = Math.Max(wa.Top, Math.Min(cy - size / 2, wa.Bottom - size));
-            Bounds = new Rectangle(x, y, size, size);
-            Render();
-        }
-
-        /// <summary>Full-size position (for saving), even while collapsed.</summary>
-        public Point HomeLocation
-        {
-            get
+            // drag velocity from actual window movement
+            var pos = new PointF(Left, Top);
+            if (hasLast && down && dragged)
             {
-                if (!collapsed) return Location;
-                var wa = WorkArea; int cy = Top + Height / 2;
-                return new Point(dock > 0 ? wa.Right - fullSize - Scale(4) : wa.Left + Scale(4), cy - fullSize / 2);
+                float vx = (pos.X - lastPos.X) / dt, vy = (pos.Y - lastPos.Y) / dt;
+                velX = velX * 0.55f + vx * 0.45f; velY = velY * 0.55f + vy * 0.45f;
             }
+            else { velX *= 0.6f; velY *= 0.6f; }
+            lastPos = pos; hasLast = true;
+
+            float speed = (float)Math.Sqrt(velX * velX + velY * velY);
+            if (speed > 60) dirAngle = (float)(Math.Atan2(velY, velX) * 180 / Math.PI);
+            float stretchTarget = down && dragged ? Math.Min(0.42f, speed / (size * 55f)) : 0f;
+
+            // springs: stretch is a little wobbly (jelly), scale snaps back with a small overshoot
+            stretchV += (260f * (stretchTarget - stretch) - 11f * stretchV) * dt;
+            stretch += stretchV * dt;
+            scaleV += (700f * (scaleTarget - scale) - 20f * scaleV) * dt;
+            scale += scaleV * dt;
+
+            bool settled = !down && Math.Abs(stretch) < 0.002f && Math.Abs(stretchV) < 0.02f
+                        && Math.Abs(scale - scaleTarget) < 0.002f && Math.Abs(scaleV) < 0.02f;
+            if (settled) { stretch = 0; stretchV = 0; scale = scaleTarget; scaleV = 0; fx.Stop(); }
+            Render();
         }
-
-        /// <summary>Re-evaluate docking after placement/settings change.</summary>
-        public void Redock()
-        {
-            if (collapsed) Expand();
-            SnapToScreen();
-            ArmCollapse();
-        }
-
-        public void SetEdgeHide(bool on) { EdgeHide = on; if (!on && collapsed) Expand(); else ArmCollapse(); }
-
-        /// <summary>Temporarily make sure the full ball is visible (e.g. when a window opens next to it).</summary>
-        public void Peek() { collapseTimer.Stop(); if (collapsed) Expand(); ArmCollapse(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left) { if (collapsed) Expand(); down = true; dragged = false; downScreen = Cursor.Position; downLoc = Location; collapseTimer.Stop(); }
+            if (e.Button == MouseButtons.Left) { down = true; dragged = false; downScreen = Cursor.Position; downLoc = Location; scaleTarget = 0.86f; Kick(); }
             base.OnMouseDown(e);
         }
 
@@ -157,7 +144,7 @@ namespace LingoBall
             {
                 var p = Cursor.Position;
                 int dx = p.X - downScreen.X, dy = p.Y - downScreen.Y;
-                if (!dragged && Math.Abs(dx) + Math.Abs(dy) > 4) dragged = true;
+                if (!dragged && Math.Abs(dx) + Math.Abs(dy) > 4) { dragged = true; scaleTarget = 1f; }
                 if (dragged) Location = new Point(downLoc.X + dx, downLoc.Y + dy);
             }
             base.OnMouseMove(e);
@@ -168,7 +155,10 @@ namespace LingoBall
             if (e.Button == MouseButtons.Left && down)
             {
                 down = false;
-                if (dragged) { SnapToScreen(); Moved?.Invoke(); ArmCollapse(); }
+                scaleTarget = 1f;
+                if (!dragged) scaleV += 2.5f;   // a little extra pop on click
+                Kick();
+                if (dragged) { SnapToScreen(); Moved?.Invoke(); }
                 else Clicked?.Invoke();
             }
             else if (e.Button == MouseButtons.Right) RightClicked?.Invoke(Cursor.Position);
@@ -178,18 +168,19 @@ namespace LingoBall
         public void SnapToScreen()
         {
             var wa = Screen.FromPoint(new Point(Left + Width / 2, Top + Height / 2)).WorkingArea;
-            int x = Math.Max(wa.Left, Math.Min(Left, wa.Right - Width));
-            int y = Math.Max(wa.Top, Math.Min(Top, wa.Bottom - Height));
+            // work in ball coordinates (window minus the transparent margin)
+            int x = Math.Max(wa.Left, Math.Min(Left + margin, wa.Right - size));
+            int y = Math.Max(wa.Top, Math.Min(Top + margin, wa.Bottom - size));
             // stick to the nearest side edge when close
-            dock = 0;
-            if (x - wa.Left < Scale(24)) { x = wa.Left + Scale(4); dock = -1; }
-            if (wa.Right - (x + Width) < Scale(24)) { x = wa.Right - Width - Scale(4); dock = 1; }
-            Location = new Point(x, y);
+            if (x - wa.Left < Scale(24)) x = wa.Left + Scale(4);
+            if (wa.Right - (x + size) < Scale(24)) x = wa.Right - size - Scale(4);
+            Location = new Point(x - margin, y - margin);
         }
 
         void Render()
         {
             if (!IsHandleCreated) return;
+            using (var canvas = new Bitmap(size + margin * 2, size + margin * 2, PixelFormat.Format32bppArgb))
             using (var bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
             {
                 using (var g = Graphics.FromImage(bmp))
@@ -270,7 +261,28 @@ namespace LingoBall
                             g.FillEllipse(b, size - pad - d * 0.30f, pad, d * 0.28f, d * 0.28f);
                     }
                 }
-                Apply(bmp);
+                using (var cg = Graphics.FromImage(canvas))
+                {
+                    cg.Clear(Color.Transparent);
+                    cg.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    cg.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    float c = margin + size / 2f;
+                    if (Math.Abs(stretch) < 0.001f && Math.Abs(scale - 1f) < 0.001f)
+                        cg.DrawImageUnscaled(bmp, margin, margin);
+                    else
+                    {
+                        // water drop: longer along the motion, thinner across it, and lagging a bit behind
+                        float sx = scale * (1f + stretch), sy = scale / (1f + stretch * 0.75f);
+                        double rad = dirAngle * Math.PI / 180;
+                        float lag = -stretch * size * 0.18f;
+                        cg.TranslateTransform(c + (float)Math.Cos(rad) * lag, c + (float)Math.Sin(rad) * lag);
+                        cg.RotateTransform(dirAngle);
+                        cg.ScaleTransform(sx, sy);
+                        cg.RotateTransform(-dirAngle);
+                        cg.DrawImage(bmp, -size / 2f, -size / 2f, size, size);
+                    }
+                }
+                Apply(canvas);
             }
         }
 
