@@ -21,6 +21,8 @@ export interface Host {
   openFile?(absPath: string, line?: number): Promise<void>;
   /** Optional: progress note from the AI, shown to the user. */
   progress?(text: string): void;
+  /** Optional: capture the user's screen. */
+  screenshot?(): Promise<{ data: string; mimeType: string; note?: string }>;
 }
 
 export interface BridgeOptions {
@@ -237,6 +239,22 @@ export class Bridge {
       return text(`${existed ? "已覆盖" : "已新建"} ${this.rel(abs)}`);
     }));
 
+    mcp.registerTool("write_binary_file", {
+      description: "写入二进制文件（图片、压缩包等），内容为 base64。大文件可分段：第一段 append=false，后续段 append=true。",
+      inputSchema: { path: z.string(), base64: z.string(), append: z.boolean().optional() },
+      annotations: { destructiveHint: true },
+    }, async (a) => guard("write_binary_file", { path: a.path, bytes: a.base64.length, append: !!a.append }, async () => {
+      const abs = this.resolve(a.path);
+      const existed = fs.existsSync(abs);
+      const buf = Buffer.from(a.base64.replace(/\s+/g, ""), "base64");
+      if (a.append) { if (!o.allowWrite) throw new Error("用户在设置里关闭了写入权限"); }
+      else await checkWrite(`${existed ? "覆盖" : "新建"} ${this.rel(abs)}（二进制 ${buf.length} 字节）`);
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      if (a.append) await fsp.appendFile(abs, buf); else await fsp.writeFile(abs, buf);
+      const size = (await fsp.stat(abs)).size;
+      return text(`${a.append ? "已追加" : existed ? "已覆盖" : "已新建"} ${this.rel(abs)}，当前 ${size} 字节`);
+    }));
+
     mcp.registerTool("edit_file", {
       description: "精确替换文件中的一段文本。old_text 必须与文件内容完全一致且唯一（除非 replace_all）。",
       inputSchema: { path: z.string(), old_text: z.string(), new_text: z.string(), replace_all: z.boolean().optional() },
@@ -310,6 +328,16 @@ export class Bridge {
       }, async (a) => guard("open_in_editor", a, async () => {
         await o.host.openFile!(this.resolve(a.path), a.line);
         return text("已在编辑器中打开");
+      }));
+    }
+    if (o.host.screenshot) {
+      mcp.registerTool("screenshot", {
+        description: "截取用户电脑当前屏幕（鼠标所在的显示器），返回图片。用于查看用户正在看的网页、软件界面或报错弹窗。只读。",
+        inputSchema: {},
+        annotations: { readOnlyHint: true },
+      }, async (a) => guard("screenshot", a, async () => {
+        const r = await o.host.screenshot!();
+        return { content: [{ type: "image" as const, data: r.data, mimeType: r.mimeType }, { type: "text" as const, text: r.note || "已截取屏幕" }] };
       }));
     }
     if (o.host.progress) {
