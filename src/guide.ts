@@ -62,7 +62,6 @@ export function fullGuide(root: string, opts: { allowWrite: boolean; allowComman
 - read_file / read_files：读文件（带行号）
 - write_file / edit_file / delete_path / move_path：修改
 - write_binary_file：写入图片等二进制文件（base64，可分段追加）
-- screenshot：截取用户屏幕（仅灵桥小球版，用户可在设置里关闭）
 - run_command：运行命令
 - get_diagnostics：编辑器错误和警告（仅 VS Code 版有；灵桥小球版请用 run_command 跑编译/检查命令）
 - open_in_editor：在用户的 VS Code 打开文件
