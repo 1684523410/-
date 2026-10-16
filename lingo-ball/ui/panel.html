@@ -74,6 +74,7 @@ input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;bo
   <label class="opt"><input type="checkbox" data-k="approveWrite"><span>修改前弹窗问我</span></label>
   <label class="opt"><input type="checkbox" data-k="allowCommand"><span>允许运行命令</span></label>
   <label class="opt"><input type="checkbox" data-k="approveCommand"><span>运行命令前弹窗问我<small>建议保持开启</small></span></label>
+  <label class="opt"><input type="checkbox" data-k="allowScreenshot"><span>允许 AI 截取屏幕<small>截图时小球和窗口会自动隐藏</small></span></label>
 </div>
 
 <div class="card">
@@ -85,7 +86,11 @@ input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;bo
 </div>
 
 <div class="card">
-  <h4>小球外观</h4>
+  <h4>小球</h4>
+  <label class="opt"><input type="radio" name="click" value="hark"><span>单击打开 Hark 对话小窗</span></label>
+  <label class="opt"><input type="radio" name="click" value="panel"><span>单击打开控制面板</span></label>
+  <label class="opt"><input type="checkbox" data-k="edgeHide"><span>贴边自动隐藏<small>拖到屏幕左右边缘，会缩成小图标吸在侧边</small></span></label>
+  <h4 style="margin-top:12px">外观</h4>
   <label class="opt"><input type="radio" name="skin" value="glass"><span>彩窗蝴蝶<small>深色，蓝紫彩色玻璃</small></span></label>
   <label class="opt"><input type="radio" name="skin" value="light"><span>清透蝴蝶<small>浅色，简洁</small></span></label>
   <label class="opt"><input type="radio" name="skin" value="classic"><span>经典小桥<small>旧版样式</small></span></label>
@@ -102,6 +107,7 @@ input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;bo
 const $=id=>document.getElementById(id);
 const post=o=>window.chrome.webview.postMessage(o);
 document.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>post({a:b.dataset.a})));
+document.querySelectorAll('input[name=click]').forEach(i=>i.addEventListener('change',()=>{if(i.checked)post({a:'set',k:'clickAction',v:i.value})}));
 document.querySelectorAll('input[name=skin]').forEach(i=>i.addEventListener('change',()=>{if(i.checked)post({a:'set',k:'ballSkin',v:i.value})}));
 document.querySelectorAll('input[type=checkbox][data-k]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:i.dataset.k,v:i.checked})));
 document.querySelectorAll('input[name=tunnel]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:'tunnel',v:i.value})));
@@ -119,6 +125,7 @@ function render(s){
   $('root').textContent=s.root||'未选择';
   document.querySelectorAll('input[name=tunnel]').forEach(i=>i.checked=i.value===s.tunnel);
   document.querySelectorAll('input[name=skin]').forEach(i=>i.checked=i.value===(s.ballSkin||'glass'));
+  document.querySelectorAll('input[name=click]').forEach(i=>i.checked=i.value===(s.clickAction||'hark'));
   $('ngrokBox').classList.toggle('hide',s.tunnel!=='ngrok');
   $('ngTok').placeholder=s.hasNgrokToken?'Authtoken 已保存（要更换才填）':'粘贴 ngrok Authtoken';
   if(!domTouched) $('ngDom').value=s.ngrokDomain||'';
