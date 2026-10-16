@@ -1,5 +1,5 @@
 {
-  "version": "0.1.3",
-  "zip": "release/LingoBall-0.1.3.zip",
-  "notes": "蝴蝶图标居中修正"
+  "version": "0.1.4",
+  "zip": "release/LingoBall-0.1.4.zip",
+  "notes": "单击小球打开 Hark 对话小窗（可截屏粘贴）、贴边自动隐藏、AI 截屏工具"
 }
