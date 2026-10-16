@@ -1,7 +1,6 @@
 // 灵桥小球 agent: headless bridge driven by LingoBall.exe over stdio (JSON lines).
 // stdout events: {t:"status",s,detail} {t:"url",url} {t:"log",m} {t:"approve",id,kind,summary} {t:"progress",m} {t:"error",m}
-// stdin commands: {t:"approve",id,ok} {t:"shot",id,path|error,note} {t:"stop"}
-// also emits {t:"shot",id} to ask the host for a screenshot
+// stdin commands: {t:"approve",id,ok} {t:"stop"}
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
@@ -19,13 +18,11 @@ const dataDir: string = c.dataDir || path.dirname(cfgPath);
 
 let seq = 0;
 const pending = new Map<number, (ok: boolean) => void>();
-const shots = new Map<number, (m: any) => void>();
 let tunnel: Tunnel | undefined, ngrok: Ngrok | undefined, bridge: Bridge | undefined;
 
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   let m: any; try { m = JSON.parse(line); } catch { return; }
   if (m.t === "approve") { pending.get(m.id)?.(!!m.ok); pending.delete(m.id); }
-  if (m.t === "shot") { shots.get(m.id)?.(m); shots.delete(m.id); }
   if (m.t === "stop") shutdown();
 });
 process.stdin.on("end", shutdown);
@@ -50,17 +47,6 @@ async function main() {
       approve: (kind, summary) => new Promise((ok) => { const id = ++seq; pending.set(id, ok); send({ t: "approve", id, kind, summary }); }),
       openFile: async (abs) => { spawn("explorer.exe", [abs], { detached: true, windowsHide: false }).unref(); },
       progress: (m) => send({ t: "progress", m }),
-      screenshot: c.allowScreenshot === false ? undefined : () => new Promise((resolve, reject) => {
-        const id = ++seq;
-        const timer = setTimeout(() => { shots.delete(id); reject(new Error("截屏超时")); }, 30000);
-        shots.set(id, (m) => {
-          clearTimeout(timer);
-          if (m.error) return reject(new Error(m.error));
-          try { resolve({ data: fs.readFileSync(m.path).toString("base64"), mimeType: "image/jpeg", note: m.note }); }
-          catch (e: any) { reject(e); }
-        });
-        send({ t: "shot", id });
-      }),
     },
   });
   await bridge.start();
