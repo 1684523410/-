@@ -53,6 +53,7 @@ namespace LingoBall
             menu.Font = new Font("Microsoft YaHei UI", 9.5f);
             menu.Opening += (s, e) => BuildMenu();
             tray.Icon = AppIcon;
+            ApplySkin();
             tray.ContextMenuStrip = menu;
             tray.Visible = true;
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) TogglePanel(); };
@@ -139,7 +140,7 @@ namespace LingoBall
                 ["allowWrite"] = cfg.AllowWrite, ["approveWrite"] = cfg.ApproveWrite,
                 ["allowCommand"] = cfg.AllowCommand, ["approveCommand"] = cfg.ApproveCommand,
                 ["autoConnect"] = cfg.AutoConnect, ["showBall"] = cfg.ShowBall, ["autoStartWin"] = AutoStartWin,
-                ["version"] = Version, ["autoUpdate"] = cfg.AutoUpdate,
+                ["version"] = Version, ["autoUpdate"] = cfg.AutoUpdate, ["ballSkin"] = cfg.BallSkin,
                 ["update"] = update?.Version ?? "", ["updateMsg"] = updateMsg, ["updating"] = updating,
             });
         }
@@ -179,6 +180,32 @@ namespace LingoBall
             PushState();
         }
 
+        static readonly string[][] Skins = { new[] { "glass", "彩窗蝴蝶（深色）" }, new[] { "light", "清透蝴蝶（浅色）" }, new[] { "classic", "经典小桥" } };
+
+        void ApplySkin()
+        {
+            ball.SetSkin(cfg.BallSkin);
+            try
+            {
+                using (var src = Ball.LoadSkin(cfg.BallSkin == "classic" ? "glass" : cfg.BallSkin))
+                {
+                    if (src == null) return;
+                    using (var bmp = new Bitmap(32, 32))
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                        {
+                            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            g.DrawImage(src, 0, 0, 32, 32);
+                        }
+                        var old = tray.Icon;
+                        tray.Icon = Icon.FromHandle(bmp.GetHicon());
+                        if (old != null && old != AppIcon) old.Dispose();
+                    }
+                }
+            }
+            catch (Exception e) { Log.Write("托盘图标切换失败: " + e.Message); }
+        }
+
         void SetOption(string k, object v)
         {
             bool b = v is bool bb && bb;
@@ -194,6 +221,7 @@ namespace LingoBall
                 case "showBall": cfg.ShowBall = b; if (b) { PlaceBall(); ball.Show(); } else ball.Hide(); restart = false; break;
                 case "autoStartWin": AutoStartWin = b; restart = false; break;
                 case "autoUpdate": cfg.AutoUpdate = b; restart = false; break;
+                case "ballSkin": cfg.BallSkin = v as string ?? "glass"; ApplySkin(); restart = false; break;
                 default: return;
             }
             cfg.Save();
@@ -222,6 +250,13 @@ namespace LingoBall
                 tun.DropDownItems.Add(it);
             }
             menu.Items.Add(tun);
+            var sk = new ToolStripMenuItem("小球外观");
+            foreach (var x in Skins)
+            {
+                var id = x[0];
+                sk.DropDownItems.Add(new ToolStripMenuItem(x[1], null, (s, e) => { SetOption("ballSkin", id); PushState(); }) { Checked = cfg.BallSkin == id });
+            }
+            menu.Items.Add(sk);
             menu.Items.Add(new ToolStripMenuItem(cfg.ShowBall ? "隐藏小球（留在托盘）" : "显示小球", null, (s, e) => { SetOption("showBall", !cfg.ShowBall); PushState(); }));
             menu.Items.Add(new ToolStripMenuItem("开机自动运行", null, (s, e) => { AutoStartWin = !AutoStartWin; PushState(); }) { Checked = AutoStartWin });
             menu.Items.Add(new ToolStripSeparator());
