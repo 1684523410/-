@@ -9,7 +9,7 @@
     <RootNamespace>LingoBall</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>logo.ico</ApplicationIcon>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <Product>灵桥小球 Lingo Ball</Product>
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
