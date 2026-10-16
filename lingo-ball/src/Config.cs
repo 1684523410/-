@@ -21,6 +21,12 @@ namespace LingoBall
         public int BallX = -1, BallY = -1;
         public string DownloadMirror = "";
         public string BallSkin = "glass"; // glass | light | classic
+        public bool EdgeHide = true;           // 贴边自动缩小隐藏
+        public string ClickAction = "hark";    // 单击小球: hark | panel
+        public string HarkUrl = "https://hark.com/login";
+        public bool HarkTopMost = true;
+        public int HarkW = 420, HarkH = 700;
+        public bool AllowScreenshot = true;
 
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
@@ -60,7 +66,7 @@ namespace LingoBall
                 ["allowWrite"] = AllowWrite, ["approveWrite"] = ApproveWrite,
                 ["allowCommand"] = AllowCommand, ["approveCommand"] = ApproveCommand,
                 ["commandTimeoutSec"] = CommandTimeoutSec, ["dataDir"] = Paths.BinDir,
-                ["downloadMirror"] = DownloadMirror,
+                ["downloadMirror"] = DownloadMirror, ["allowScreenshot"] = AllowScreenshot,
             };
             return Json.Serialize(d);
         }
