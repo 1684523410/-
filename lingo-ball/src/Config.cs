@@ -20,6 +20,7 @@ namespace LingoBall
         public bool AutoConnect = true, ShowBall = true, AutoUpdate = true;
         public int BallX = -1, BallY = -1;
         public string DownloadMirror = "";
+        public string BallSkin = "glass"; // glass | light | classic
 
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
