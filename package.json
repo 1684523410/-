@@ -1,0 +1,212 @@
+{
+  "name": "lingo-bridge",
+  "displayName": "灵桥 Lingo Bridge - 网页 AI 本地桥接",
+  "description": "把当前 VS Code 工作区变成带令牌保护的 MCP 服务，通过 Cloudflare / ngrok 隧道接入 Hark、ChatGPT、Claude 等网页 AI。侧边栏面板一键控制，内置 AI 使用说明。免费开源。",
+  "version": "0.4.2",
+  "publisher": "lingo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1684523410/-"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "bridge",
+    "chatgpt",
+    "claude",
+    "tunnel",
+    "cloudflare"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "lingoBridge.start",
+        "title": "启动",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.stop",
+        "title": "停止",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.copyUrl",
+        "title": "复制 MCP 地址",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.regenerateToken",
+        "title": "重新生成访问令牌",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.showLog",
+        "title": "查看日志",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.checkUpdate",
+        "title": "检查更新",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.setupNgrok",
+        "title": "设置 ngrok（固定链接/走代理）",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.openPanel",
+        "title": "打开控制面板",
+        "category": "灵桥"
+      },
+      {
+        "command": "lingoBridge.createRules",
+        "title": "创建项目规则文件",
+        "category": "灵桥"
+      }
+    ],
+    "configuration": {
+      "title": "灵桥 Lingo Bridge",
+      "properties": {
+        "lingoBridge.port": {
+          "type": "number",
+          "default": 3917,
+          "description": "本地 MCP 服务端口"
+        },
+        "lingoBridge.tunnel": {
+          "type": "string",
+          "enum": [
+            "cloudflare",
+            "ngrok",
+            "none"
+          ],
+          "enumDescriptions": [
+            "自动启动 Cloudflare 临时隧道（免费，无需账号，地址每次变）",
+            "ngrok 隧道（需免费账号；可走代理；可用免费固定域名）",
+            "不启动隧道（自己用 frp 等穿透时选这个，并填写 publicUrl）"
+          ],
+          "default": "cloudflare",
+          "description": "公网隧道方式"
+        },
+        "lingoBridge.publicUrl": {
+          "type": "string",
+          "default": "",
+          "description": "tunnel 为 none 时，你自己的公网地址，例如 https://mcp.example.com（会自动拼接 /mcp/令牌）"
+        },
+        "lingoBridge.cloudflaredPath": {
+          "type": "string",
+          "default": "",
+          "description": "cloudflared 可执行文件路径；留空则首次启动时自动下载"
+        },
+        "lingoBridge.downloadMirror": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub 下载加速前缀（国内下载慢时用），例如 https://ghproxy.example.com/ ，留空直连"
+        },
+        "lingoBridge.proxy": {
+          "type": "string",
+          "default": "",
+          "description": "ngrok 使用的代理（注意：ngrok 免费版不允许走代理，付费版才可用）。留空=直连（推荐）；auto=读取 Windows 系统代理；也可手填 http://127.0.0.1:10808"
+        },
+        "lingoBridge.ngrokDomain": {
+          "type": "string",
+          "default": "",
+          "description": "ngrok 免费固定域名，如 xxx.ngrok-free.app；留空则随机"
+        },
+        "lingoBridge.ngrokPath": {
+          "type": "string",
+          "default": "",
+          "description": "ngrok 可执行文件路径；留空自动下载"
+        },
+        "lingoBridge.allowWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "允许 AI 新建/修改/删除文件"
+        },
+        "lingoBridge.allowCommand": {
+          "type": "boolean",
+          "default": true,
+          "description": "允许 AI 运行命令"
+        },
+        "lingoBridge.approveWrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "每次修改文件前弹窗确认"
+        },
+        "lingoBridge.approveCommand": {
+          "type": "boolean",
+          "default": true,
+          "description": "每次运行命令前弹窗确认（3 分钟无响应视为拒绝）"
+        },
+        "lingoBridge.commandTimeoutSec": {
+          "type": "number",
+          "default": 120,
+          "description": "命令默认超时（秒）"
+        },
+        "lingoBridge.autoUpdate": {
+          "type": "boolean",
+          "default": true,
+          "description": "自动从你的 GitHub 仓库检查并安装新版（需在 VS Code 登录 GitHub）"
+        },
+        "lingoBridge.updateRepo": {
+          "type": "string",
+          "default": "1684523410/-, 1684523410/lingo-bridge, 1684523410/my-",
+          "description": "更新来源仓库 owner/repo，多个用逗号分隔，按顺序尝试"
+        },
+        "lingoBridge.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "打开 VS Code（且打开了文件夹）时自动启动灵桥"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lingoBridge",
+          "title": "灵桥",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lingoBridge": [
+        {
+          "type": "webview",
+          "id": "lingoBridge.panel",
+          "name": "控制面板"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --minify",
+    "build:core": "esbuild src/core.ts --bundle --platform=node --target=node18 --format=cjs --outfile=test/core.cjs",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "fast-glob": "^3.3.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "icon": "media/logo.png"
+}
