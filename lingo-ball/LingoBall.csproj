@@ -9,7 +9,7 @@
     <RootNamespace>LingoBall</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>logo.ico</ApplicationIcon>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Product>灵桥小球 Lingo Ball</Product>
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -22,5 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="ui/panel.html" LogicalName="LingoBall.panel.html" />
+    <EmbeddedResource Include="skins/glass.png" LogicalName="LingoBall.skin.glass.png" />
+    <EmbeddedResource Include="skins/light.png" LogicalName="LingoBall.skin.light.png" />
   </ItemGroup>
 </Project>
