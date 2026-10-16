@@ -1,0 +1,16 @@
+import { build } from "esbuild";
+await build({ entryPoints: ["src/tunnel.ts"], bundle: true, platform: "node", format: "esm", outfile: "test/tunnel.out.mjs" });
+const { Tunnel } = await import("./tunnel.out.mjs");
+import core from "./core.cjs";
+const b = new core.Bridge({ root: "/tmp/ws", port: 3918, token: "tok999", allowWrite: true, allowCommand: true, approveWrite: false, approveCommand: false, commandTimeoutSec: 10, host: { approve: async()=>true, log: ()=>{} } });
+await b.start();
+const t = new Tunnel("/tmp/cfbin", (s) => {});
+const bin = await t.ensureBinary("", "", (p) => { if (p % 25 === 0) console.log("dl", p); });
+const url = await t.start(bin, 3918);
+console.log("TUNNEL", url);
+await new Promise(r => setTimeout(r, 8000));
+const r = await fetch(url + "/health").then(r => r.status + " " + r.statusText).catch(e => "ERR " + e.message);
+console.log("health via tunnel", r);
+const r2 = await fetch(url + "/mcp/tok999", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) }).then(r => r.text()).catch(e => "ERR " + e.message);
+console.log("tools/list via tunnel", r2.slice(0, 200));
+t.stop(); await b.stop(); process.exit(0);
