@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>灵桥小球</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--fg:#1f2330;--mut:#6b7080;--line:#e6e8ef;--pri:#5b5bf0;--pri2:#18b6e8;--ok:#2ea043;--warn:#d4a017;--err:#e5484d}
+@media (prefers-color-scheme: dark){:root{--bg:#1b1d24;--card:#242731;--fg:#e8eaf0;--mut:#9aa0ae;--line:#343846}}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;font-size:13px;background:var(--bg);color:var(--fg);-webkit-user-select:none;user-select:none}
+.hero{padding:18px 16px 14px;background:linear-gradient(135deg,var(--pri),var(--pri2));color:#fff}
+.hero .row1{display:flex;align-items:center;gap:10px}
+.dot{width:11px;height:11px;border-radius:50%;background:#bbb;box-shadow:0 0 0 3px rgba(255,255,255,.25)}
+.dot.on{background:#4ade80}.dot.starting,.dot.preparing{background:#facc15;animation:p 1s infinite}.dot.error{background:#ff6b6b}
+@keyframes p{50%{opacity:.35}}
+.st{font-size:17px;font-weight:700}
+.sub{opacity:.85;font-size:12px;margin-top:6px;word-break:break-all}
+.btns{display:flex;gap:8px;margin-top:12px}
+button{font:inherit;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;background:var(--pri);color:#fff}
+button:hover{filter:brightness(1.08)}
+button.ghost{background:transparent;color:var(--pri);border:1px solid var(--line)}
+.hero button{background:#fff;color:#4b4be0;font-weight:600;flex:1}
+.hero button.sec{background:rgba(255,255,255,.18);color:#fff}
+.url{margin-top:10px;background:rgba(0,0,0,.18);border-radius:8px;padding:7px 9px;font-family:Consolas,monospace;font-size:11.5px;word-break:break-all;-webkit-user-select:text;user-select:text}
+.err{margin:12px 12px 0;padding:10px 12px;border-radius:8px;background:rgba(229,72,77,.12);color:var(--err);word-break:break-all}
+.card{background:var(--card);margin:12px;border-radius:10px;padding:12px 14px;border:1px solid var(--line)}
+.card h4{margin:0 0 8px;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.04em}
+.path{display:flex;gap:8px;align-items:center}
+.path .p{flex:1;font-family:Consolas,monospace;font-size:12px;word-break:break-all;-webkit-user-select:text;user-select:text}
+.path button{padding:6px 10px}
+label.opt{display:flex;gap:8px;align-items:flex-start;padding:5px 0;cursor:pointer}
+label.opt small{display:block;color:var(--mut);font-size:11.5px}
+input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);margin:4px 0 8px}
+.ngrok{margin:4px 0 0 24px}
+.ngrok a{color:var(--pri)}
+.log{font-family:Consolas,monospace;font-size:11px;max-height:160px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:var(--mut);-webkit-user-select:text;user-select:text}
+.foot{display:flex;justify-content:space-between;align-items:center;color:var(--mut);font-size:11.5px;margin:4px 14px 16px}
+.foot a{color:var(--mut);cursor:pointer;text-decoration:underline}
+.upd{margin:12px 12px 0;padding:10px 12px;border-radius:8px;background:rgba(91,91,240,.12);display:flex;gap:8px;align-items:center;justify-content:space-between}
+.upd button{padding:6px 10px;white-space:nowrap}
+.hide{display:none!important}
+</style></head><body>
+<div class="hero">
+  <div class="row1"><span id="dot" class="dot"></span><span class="st" id="st">未启动</span></div>
+  <div class="sub" id="sub"></div>
+  <div class="url hide" id="url"></div>
+  <div class="btns">
+    <button id="bStart" data-a="start">启动</button>
+    <button id="bCopy" class="hide" data-a="copy">复制 MCP 地址</button>
+    <button id="bStop" class="sec hide" data-a="stop">停止</button>
+  </div>
+</div>
+<div class="err hide" id="err"></div>
+<div class="upd hide" id="upd"><span id="updTxt"></span><button id="bUpd" data-a="applyUpdate">立即更新</button></div>
+
+<div class="card">
+  <h4>工作文件夹（AI 只能访问这里）</h4>
+  <div class="path"><span class="p" id="root">未选择</span><button data-a="pickFolder">选择</button><button class="ghost" data-a="openFolder">打开</button></div>
+</div>
+
+<div class="card">
+  <h4>隧道（让网页 AI 连到你的电脑）</h4>
+  <label class="opt"><input type="radio" name="tunnel" value="ngrok"><span>ngrok 固定链接<small>地址不变，推荐</small></span></label>
+  <div class="ngrok" id="ngrokBox">
+    <input type="password" id="ngTok" placeholder="Authtoken（已保存则留空）">
+    <input type="text" id="ngDom" placeholder="固定域名，如 xxx.ngrok-free.dev（可留空）">
+    <button id="bNg">保存 ngrok 设置</button>
+    <div style="margin-top:6px;color:var(--mut);font-size:11.5px">在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank">ngrok 后台</a> 复制 Authtoken；固定域名在 Domains 页面领取。</div>
+  </div>
+  <label class="opt"><input type="radio" name="tunnel" value="cloudflare"><span>Cloudflare 临时隧道<small>免注册，每次启动地址会变，国内可能不稳</small></span></label>
+  <label class="opt"><input type="radio" name="tunnel" value="none"><span>不用隧道<small>只在本机使用</small></span></label>
+</div>
+
+<div class="card">
+  <h4>AI 权限</h4>
+  <label class="opt"><input type="checkbox" data-k="allowWrite"><span>允许修改文件</span></label>
+  <label class="opt"><input type="checkbox" data-k="approveWrite"><span>修改前弹窗问我</span></label>
+  <label class="opt"><input type="checkbox" data-k="allowCommand"><span>允许运行命令</span></label>
+  <label class="opt"><input type="checkbox" data-k="approveCommand"><span>运行命令前弹窗问我<small>建议保持开启</small></span></label>
+</div>
+
+<div class="card">
+  <h4>常规</h4>
+  <label class="opt"><input type="checkbox" data-k="autoConnect"><span>打开小球时自动启动灵桥</span></label>
+  <label class="opt"><input type="checkbox" data-k="autoStartWin"><span>开机自动运行小球</span></label>
+  <label class="opt"><input type="checkbox" data-k="autoUpdate"><span>自动检查更新</span></label>
+  <label class="opt"><input type="checkbox" data-k="showBall"><span>在桌面显示悬浮球<small>关闭后只留在右下角托盘</small></span></label>
+</div>
+
+<div class="card">
+  <h4>日志</h4>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="foot"><span id="ver">灵桥小球</span><span><a data-a="checkUpdate">检查更新</a> · <a data-a="openLog">日志文件</a> · <a data-a="regen">重置令牌</a> · <a data-a="exit">退出</a></span></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const post=o=>window.chrome.webview.postMessage(o);
+document.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>post({a:b.dataset.a})));
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:i.dataset.k,v:i.checked})));
+document.querySelectorAll('input[name=tunnel]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:'tunnel',v:i.value})));
+$('bNg').addEventListener('click',()=>{post({a:'saveNgrok',token:$('ngTok').value,domain:$('ngDom').value});$('ngTok').value='';});
+const names={off:'未启动',preparing:'准备中…',starting:'启动中…',on:'运行中',error:'出错了'};
+let domTouched=false; $('ngDom').addEventListener('input',()=>domTouched=true);
+function mask(u){return u.replace(/(\/mcp\/)(.{4}).*$/,'$1$2••••••••')}
+function render(s){
+  $('dot').className='dot '+s.status; $('st').textContent='灵桥 '+(names[s.status]||s.status);
+  const busy=s.status==='on'||s.status==='starting'||s.status==='preparing';
+  $('sub').textContent=s.status==='on'?'AI 可以连接了':(busy?s.detail:(s.root?'点“启动”开始':'先选择工作文件夹'));
+  $('bStart').classList.toggle('hide',busy); $('bStop').classList.toggle('hide',!busy);
+  $('bCopy').classList.toggle('hide',!s.url); $('url').classList.toggle('hide',!s.url); $('url').textContent=s.url?mask(s.url):'';
+  $('err').classList.toggle('hide',!s.error); $('err').textContent=s.error||'';
+  $('root').textContent=s.root||'未选择';
+  document.querySelectorAll('input[name=tunnel]').forEach(i=>i.checked=i.value===s.tunnel);
+  $('ngrokBox').classList.toggle('hide',s.tunnel!=='ngrok');
+  $('ngTok').placeholder=s.hasNgrokToken?'Authtoken 已保存（要更换才填）':'粘贴 ngrok Authtoken';
+  if(!domTouched) $('ngDom').value=s.ngrokDomain||'';
+  document.querySelectorAll('input[type=checkbox][data-k]').forEach(i=>i.checked=!!s[i.dataset.k]);
+  $('ver').textContent='灵桥小球 v'+s.version;
+  const showU=!!(s.update||s.updateMsg); $('upd').classList.toggle('hide',!showU);
+  $('updTxt').textContent=s.updateMsg||''; $('bUpd').classList.toggle('hide',!s.update||s.updating);
+}
+window.chrome.webview.addEventListener('message',e=>{
+  const m=e.data; if(!m) return;
+  if(m.type==='state') render(m);
+  if(m.type==='log'){const l=$('log'); const atEnd=l.scrollTop+l.clientHeight>=l.scrollHeight-4; l.textContent+=(l.textContent?'\n':'')+m.line; if(l.textContent.length>40000) l.textContent=l.textContent.slice(-30000); if(atEnd) l.scrollTop=l.scrollHeight;}
+});
+post({a:'ready'});
+</script></body></html>
