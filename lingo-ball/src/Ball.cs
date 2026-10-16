@@ -134,7 +134,7 @@ namespace LingoBall
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.Clear(Color.Transparent);
-                    float pad = size * 0.06f, d = size - pad * 2;
+                    float pad = (float)Math.Round(size * 0.06f), d = size - pad * 2;
                     var rc = new RectangleF(pad, pad, d, d);
 
                     float cx = size / 2f;
@@ -145,6 +145,7 @@ namespace LingoBall
                         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                         var ia = new ImageAttributes();
+                        ia.SetWrapMode(WrapMode.TileFlipXY);
                         if (state == State.Off)
                         {
                             // greyed, slightly transparent when stopped
