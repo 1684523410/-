@@ -18,6 +18,26 @@ namespace LingoBall
         Point downScreen, downLoc;
         bool down, dragged;
         int size;
+        string skin = "glass";
+        Bitmap skinImg;
+
+        public static Bitmap LoadSkin(string name)
+        {
+            try
+            {
+                var st = typeof(Ball).Assembly.GetManifestResourceStream("LingoBall.skin." + name + ".png");
+                return st == null ? null : new Bitmap(st);
+            }
+            catch { return null; }
+        }
+
+        public void SetSkin(string name)
+        {
+            skin = string.IsNullOrEmpty(name) ? "glass" : name;
+            skinImg?.Dispose();
+            skinImg = skin == "classic" ? null : LoadSkin(skin);
+            Render();
+        }
 
         public event Action Clicked;
         public event Action<Point> RightClicked;
@@ -117,38 +137,63 @@ namespace LingoBall
                     float pad = size * 0.06f, d = size - pad * 2;
                     var rc = new RectangleF(pad, pad, d, d);
 
-                    // soft shadow
-                    using (var sh = new SolidBrush(Color.FromArgb(hover ? 70 : 45, 0, 0, 0)))
-                        g.FillEllipse(sh, rc.X + 1, rc.Y + 2, rc.Width, rc.Height);
-
-                    // body gradient
-                    using (var br = new LinearGradientBrush(rc, Color.FromArgb(0x6D, 0x5B, 0xFF), Color.FromArgb(0x18, 0xB6, 0xE8), 45f))
-                        g.FillEllipse(br, rc);
-                    if (state == State.Off)
-                        using (var dim = new SolidBrush(Color.FromArgb(90, 40, 40, 50))) g.FillEllipse(dim, rc);
-
-                    // bridge glyph
-                    float cx = size / 2f, w = d * 0.56f, baseY = pad + d * 0.64f, top = pad + d * 0.34f;
-                    using (var pen = new Pen(Color.White, Math.Max(2f, size * 0.055f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    float cx = size / 2f;
+                    if (skinImg != null)
                     {
-                        var path = new GraphicsPath();
-                        path.AddBezier(cx - w / 2, baseY, cx - w / 4, top - d * 0.04f, cx + w / 4, top - d * 0.04f, cx + w / 2, baseY);
-                        g.DrawPath(pen, path);
-                        g.DrawLine(pen, cx - w / 2 - d * 0.04f, baseY, cx + w / 2 + d * 0.04f, baseY);
-                        pen.Width = Math.Max(1.5f, size * 0.035f);
-                        g.DrawLine(pen, cx, baseY, cx, top + d * 0.03f);
-                        g.DrawLine(pen, cx - w * 0.27f, baseY, cx - w * 0.27f, top + d * 0.12f);
-                        g.DrawLine(pen, cx + w * 0.27f, baseY, cx + w * 0.27f, top + d * 0.12f);
+                        using (var sh = new SolidBrush(Color.FromArgb(hover ? 60 : 35, 0, 0, 0)))
+                            g.FillEllipse(sh, rc.X + 1, rc.Y + 2, rc.Width, rc.Height);
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        var ia = new ImageAttributes();
+                        if (state == State.Off)
+                        {
+                            // greyed, slightly transparent when stopped
+                            float r = 0.3f, gg = 0.59f, bl = 0.11f;
+                            ia.SetColorMatrix(new ColorMatrix(new[] {
+                                new[]{ r, r, r, 0f, 0f }, new[]{ gg, gg, gg, 0f, 0f }, new[]{ bl, bl, bl, 0f, 0f },
+                                new[]{ 0f, 0f, 0f, 0.75f, 0f }, new[]{ 0f, 0f, 0f, 0f, 1f } }));
+                        }
+                        g.DrawImage(skinImg, new Rectangle((int)Math.Round(rc.X), (int)Math.Round(rc.Y), (int)Math.Round(rc.Width), (int)Math.Round(rc.Height)),
+                            0, 0, skinImg.Width, skinImg.Height, GraphicsUnit.Pixel, ia);
+                        ia.Dispose();
                     }
-                    // star
-                    DrawStar(g, cx, pad + d * 0.22f, d * 0.09f, Color.FromArgb(0xFF, 0xD8, 0x4D));
+                    else
+                    {
+                        // soft shadow
+                        using (var sh = new SolidBrush(Color.FromArgb(hover ? 70 : 45, 0, 0, 0)))
+                            g.FillEllipse(sh, rc.X + 1, rc.Y + 2, rc.Width, rc.Height);
+
+                        // body gradient
+                        using (var br = new LinearGradientBrush(rc, Color.FromArgb(0x6D, 0x5B, 0xFF), Color.FromArgb(0x18, 0xB6, 0xE8), 45f))
+                            g.FillEllipse(br, rc);
+                        if (state == State.Off)
+                            using (var dim = new SolidBrush(Color.FromArgb(90, 40, 40, 50))) g.FillEllipse(dim, rc);
+
+                        // bridge glyph
+                        float w = d * 0.56f, baseY = pad + d * 0.64f, top = pad + d * 0.34f;
+                        using (var pen = new Pen(Color.White, Math.Max(2f, size * 0.055f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        {
+                            var path = new GraphicsPath();
+                            path.AddBezier(cx - w / 2, baseY, cx - w / 4, top - d * 0.04f, cx + w / 4, top - d * 0.04f, cx + w / 2, baseY);
+                            g.DrawPath(pen, path);
+                            g.DrawLine(pen, cx - w / 2 - d * 0.04f, baseY, cx + w / 2 + d * 0.04f, baseY);
+                            pen.Width = Math.Max(1.5f, size * 0.035f);
+                            g.DrawLine(pen, cx, baseY, cx, top + d * 0.03f);
+                            g.DrawLine(pen, cx - w * 0.27f, baseY, cx - w * 0.27f, top + d * 0.12f);
+                            g.DrawLine(pen, cx + w * 0.27f, baseY, cx + w * 0.27f, top + d * 0.12f);
+                        }
+                        // star
+                        DrawStar(g, cx, pad + d * 0.22f, d * 0.09f, Color.FromArgb(0xFF, 0xD8, 0x4D));
+
+
+                    }
 
                     // status ring
                     Color ring = state == State.On ? Color.FromArgb(0x3F, 0xB9, 0x50)
                                : state == State.Starting ? Color.FromArgb(0xF0, 0xB4, 0x29)
                                : state == State.Error ? Color.FromArgb(0xF8, 0x51, 0x49)
                                : Color.FromArgb(0x9A, 0xA0, 0xA6);
-                    float rw = Math.Max(2f, size * 0.05f);
+                    float rw = Math.Max(2f, size * (skinImg != null ? 0.04f : 0.05f));
                     var rr = RectangleF.Inflate(rc, -rw / 2, -rw / 2);
                     using (var pen = new Pen(ring, rw))
                     {
