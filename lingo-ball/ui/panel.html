@@ -85,6 +85,13 @@ input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;bo
 </div>
 
 <div class="card">
+  <h4>小球外观</h4>
+  <label class="opt"><input type="radio" name="skin" value="glass"><span>彩窗蝴蝶<small>深色，蓝紫彩色玻璃</small></span></label>
+  <label class="opt"><input type="radio" name="skin" value="light"><span>清透蝴蝶<small>浅色，简洁</small></span></label>
+  <label class="opt"><input type="radio" name="skin" value="classic"><span>经典小桥<small>旧版样式</small></span></label>
+</div>
+
+<div class="card">
   <h4>日志</h4>
   <div class="log" id="log"></div>
 </div>
@@ -95,6 +102,7 @@ input[type=text],input[type=password]{width:100%;font:inherit;padding:7px 9px;bo
 const $=id=>document.getElementById(id);
 const post=o=>window.chrome.webview.postMessage(o);
 document.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>post({a:b.dataset.a})));
+document.querySelectorAll('input[name=skin]').forEach(i=>i.addEventListener('change',()=>{if(i.checked)post({a:'set',k:'ballSkin',v:i.value})}));
 document.querySelectorAll('input[type=checkbox][data-k]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:i.dataset.k,v:i.checked})));
 document.querySelectorAll('input[name=tunnel]').forEach(i=>i.addEventListener('change',()=>post({a:'set',k:'tunnel',v:i.value})));
 $('bNg').addEventListener('click',()=>{post({a:'saveNgrok',token:$('ngTok').value,domain:$('ngDom').value});$('ngTok').value='';});
@@ -110,6 +118,7 @@ function render(s){
   $('err').classList.toggle('hide',!s.error); $('err').textContent=s.error||'';
   $('root').textContent=s.root||'未选择';
   document.querySelectorAll('input[name=tunnel]').forEach(i=>i.checked=i.value===s.tunnel);
+  document.querySelectorAll('input[name=skin]').forEach(i=>i.checked=i.value===(s.ballSkin||'glass'));
   $('ngrokBox').classList.toggle('hide',s.tunnel!=='ngrok');
   $('ngTok').placeholder=s.hasNgrokToken?'Authtoken 已保存（要更换才填）':'粘贴 ngrok Authtoken';
   if(!domTouched) $('ngDom').value=s.ngrokDomain||'';
