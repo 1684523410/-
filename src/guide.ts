@@ -59,9 +59,11 @@ export function fullGuide(root: string, opts: { allowWrite: boolean; allowComman
 - get_usage_guide：本说明
 - get_workspace_info：工作区概况
 - list_directory / find_files / search_text：浏览与搜索
-- read_file / read_files：读文件（带行号）
+- read_file / read_files：读文本文件（带行号）
+- get_download_link：【整文件下载】拿 HTTP 直链，curl 一次下完任意大文件（dwg/docx/pdf/zip），支持断点续传；同时给出 PUT 上传链接
+- file_info：文件大小、修改时间、SHA-256 校验
+- read_binary：按字节读取任意文件（base64，每次≤4MB），直链用不了时的备选
 - write_file / edit_file / delete_path / move_path：修改
-- write_binary_file：写入图片等二进制文件（base64，可分段追加）
 - run_command：运行命令
 - get_diagnostics：编辑器错误和警告（仅 VS Code 版有；灵桥小球版请用 run_command 跑编译/检查命令）
 - open_in_editor：在用户的 VS Code 打开文件

@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import * as crypto from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -21,8 +22,6 @@ export interface Host {
   openFile?(absPath: string, line?: number): Promise<void>;
   /** Optional: progress note from the AI, shown to the user. */
   progress?(text: string): void;
-  /** Optional: capture the user's screen. */
-  screenshot?(): Promise<{ data: string; mimeType: string; note?: string }>;
 }
 
 export interface BridgeOptions {
@@ -41,6 +40,8 @@ export const VERSION = "0.4.2";
 const DEFAULT_IGNORE = ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/out/**", "**/build/**", "**/.venv/**", "**/__pycache__/**"];
 const MAX_READ = 200_000; // chars per file read
 const MAX_OUT = 60_000; // chars of command output
+const MAX_B64 = 4_000_000; // bytes per read_binary call
+const MAX_UPLOAD = 2_000_000_000; // bytes per HTTP upload
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -54,6 +55,8 @@ function clip(s: string, n: number) {
 
 export class Bridge {
   private server?: http.Server;
+  /** Public base URL (tunnel), set by the host after the tunnel is up. */
+  publicBase = "";
   constructor(private o: BridgeOptions) {}
 
   /** Resolve a user path inside the workspace root; throw if it escapes. */
@@ -207,6 +210,55 @@ export class Bridge {
       return text(out.join("\n") || "没有找到匹配");
     }));
 
+    mcp.registerTool("file_info", {
+      description: "查看文件大小、修改时间和 SHA-256（可选）。下载大文件前先用它确认大小，下载后比对哈希。",
+      inputSchema: { path: z.string(), hash: z.boolean().optional() },
+      annotations: { readOnlyHint: true },
+    }, async (a) => guard("file_info", a, async () => {
+      const abs = this.resolve(a.path);
+      const st = await fsp.stat(abs);
+      if (!st.isFile()) throw new Error("不是文件: " + a.path);
+      let h = "";
+      if (a.hash) h = await sha256(abs);
+      return text(JSON.stringify({ path: this.rel(abs), size: st.size, mtime: st.mtime.toISOString(), sha256: h || undefined }));
+    }));
+
+    mcp.registerTool("get_download_link", {
+      description: "【整文件下载】返回一个 HTTP 直链，用 curl/wget 一次下完整个文件（任意二进制：dwg、docx、pdf、zip…），支持断点续传（Range）。比 read_file/read_binary 快得多。链接含令牌，只给自己用。上传同理：对 upload 链接 PUT 文件内容即可（需写入权限）。",
+      inputSchema: { path: z.string() },
+      annotations: { readOnlyHint: true },
+    }, async (a) => guard("get_download_link", a, async () => {
+      const abs = this.resolve(a.path);
+      const st = await fsp.stat(abs);
+      const base = (this.publicBase || `http://127.0.0.1:${o.port}`).replace(/\/+$/, "");
+      const q = "?path=" + encodeURIComponent(this.rel(abs));
+      return text(JSON.stringify({
+        size: st.size,
+        download: `${base}${this.dlPath}${q}`,
+        upload: `${base}${this.upPath}${q}`,
+        curl: `curl -fL -H "ngrok-skip-browser-warning: 1" -C - -o "${path.basename(abs)}" "${base}${this.dlPath}${q}"`,
+        note: "下载后可用 file_info(hash:true) 校验 SHA-256；响应头 X-File-Size 为文件大小。",
+      }, null, 1));
+    }));
+
+    mcp.registerTool("read_binary", {
+      description: "按字节读取任意文件，返回 base64（每次最多 4MB）。用于无法直连下载链接时；能用 get_download_link 时优先用直链。",
+      inputSchema: { path: z.string(), offset: z.number().int().min(0).optional(), length: z.number().int().min(1).optional() },
+      annotations: { readOnlyHint: true },
+    }, async (a) => guard("read_binary", a, async () => {
+      const abs = this.resolve(a.path);
+      const st = await fsp.stat(abs);
+      const off = a.offset ?? 0;
+      const len = Math.min(a.length ?? MAX_B64, MAX_B64, Math.max(0, st.size - off));
+      const fh = await fsp.open(abs, "r");
+      try {
+        const buf = Buffer.alloc(len);
+        const { bytesRead } = await fh.read(buf, 0, len, off);
+        const end = off + bytesRead;
+        return text(`size=${st.size} offset=${off} bytes=${bytesRead} next=${end < st.size ? end : "EOF"}\n` + buf.subarray(0, bytesRead).toString("base64"));
+      } finally { await fh.close(); }
+    }));
+
     mcp.registerTool("read_file", {
       description: "读取文件内容，带行号。可用 start_line / end_line 只读一段（从 1 开始）。",
       inputSchema: { path: z.string(), start_line: z.number().int().min(1).optional(), end_line: z.number().int().min(1).optional() },
@@ -237,22 +289,6 @@ export class Bridge {
       await fsp.mkdir(path.dirname(abs), { recursive: true });
       await fsp.writeFile(abs, a.content, "utf8");
       return text(`${existed ? "已覆盖" : "已新建"} ${this.rel(abs)}`);
-    }));
-
-    mcp.registerTool("write_binary_file", {
-      description: "写入二进制文件（图片、压缩包等），内容为 base64。大文件可分段：第一段 append=false，后续段 append=true。",
-      inputSchema: { path: z.string(), base64: z.string(), append: z.boolean().optional() },
-      annotations: { destructiveHint: true },
-    }, async (a) => guard("write_binary_file", { path: a.path, bytes: a.base64.length, append: !!a.append }, async () => {
-      const abs = this.resolve(a.path);
-      const existed = fs.existsSync(abs);
-      const buf = Buffer.from(a.base64.replace(/\s+/g, ""), "base64");
-      if (a.append) { if (!o.allowWrite) throw new Error("用户在设置里关闭了写入权限"); }
-      else await checkWrite(`${existed ? "覆盖" : "新建"} ${this.rel(abs)}（二进制 ${buf.length} 字节）`);
-      await fsp.mkdir(path.dirname(abs), { recursive: true });
-      if (a.append) await fsp.appendFile(abs, buf); else await fsp.writeFile(abs, buf);
-      const size = (await fsp.stat(abs)).size;
-      return text(`${a.append ? "已追加" : existed ? "已覆盖" : "已新建"} ${this.rel(abs)}，当前 ${size} 字节`);
     }));
 
     mcp.registerTool("edit_file", {
@@ -330,16 +366,6 @@ export class Bridge {
         return text("已在编辑器中打开");
       }));
     }
-    if (o.host.screenshot) {
-      mcp.registerTool("screenshot", {
-        description: "截取用户电脑当前屏幕（鼠标所在的显示器），返回图片。用于查看用户正在看的网页、软件界面或报错弹窗。只读。",
-        inputSchema: {},
-        annotations: { readOnlyHint: true },
-      }, async (a) => guard("screenshot", a, async () => {
-        const r = await o.host.screenshot!();
-        return { content: [{ type: "image" as const, data: r.data, mimeType: r.mimeType }, { type: "text" as const, text: r.note || "已截取屏幕" }] };
-      }));
-    }
     if (o.host.progress) {
       mcp.registerTool("report_progress", {
         description: "把当前进度告诉用户（会显示在 VS Code 里）。长任务每完成一个阶段调用一次。",
@@ -350,6 +376,69 @@ export class Bridge {
   }
 
   get mcpPath() { return `/mcp/${this.o.token}`; }
+  get dlPath() { return `/dl/${this.o.token}`; }
+  get upPath() { return `/up/${this.o.token}`; }
+
+  /** Whole-file download (GET/HEAD, Range) and upload (PUT) over plain HTTP. */
+  private async fileHttp(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+    const o = this.o;
+    const p = url.searchParams.get("path") ?? "";
+    let abs: string;
+    try { abs = this.resolve(p); } catch (e: any) { res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end(String(e.message)); return; }
+    if (url.pathname === this.upPath) {
+      if (req.method !== "PUT" && req.method !== "POST") { res.writeHead(405, { Allow: "PUT" }).end(); return; }
+      if (!o.allowWrite) { res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("用户关闭了写入权限"); return; }
+      const exists = fs.existsSync(abs);
+      if (o.approveWrite && !(await o.host.approve("write", `上传${exists ? "覆盖" : "新建"}文件 ${this.rel(abs)}`))) {
+        res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("用户拒绝了这次写入"); return;
+      }
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      const tmp = abs + ".lingo-upload";
+      let size = 0;
+      const hash = crypto.createHash("sha256");
+      await new Promise<void>((ok, bad) => {
+        const ws = fs.createWriteStream(tmp);
+        req.on("data", (c: Buffer) => { size += c.length; hash.update(c); if (size > MAX_UPLOAD) { req.destroy(); ws.destroy(); bad(new Error("文件过大")); } });
+        req.pipe(ws);
+        ws.on("finish", () => ok());
+        ws.on("error", bad); req.on("error", bad);
+      }).catch(async (e) => { await fsp.rm(tmp, { force: true }); throw e; });
+      await fsp.rename(tmp, abs);
+      o.host.log(`↑ 上传 ${this.rel(abs)} (${size} 字节)`);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, path: this.rel(abs), size, sha256: hash.digest("hex") }));
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405, { Allow: "GET, HEAD" }).end(); return; }
+    let st: fs.Stats;
+    try { st = await fsp.stat(abs); } catch { res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("文件不存在: " + p); return; }
+    if (!st.isFile()) { res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("不是文件（文件夹请先压缩成 zip）"); return; }
+    let start = 0, end = st.size - 1, status = 200;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+    if (m && st.size > 0) {
+      if (m[1] === "") { start = Math.max(0, st.size - Number(m[2])); }
+      else { start = Number(m[1]); if (m[2] !== "") end = Math.min(end, Number(m[2])); }
+      if (start > end || start >= st.size) { res.writeHead(416, { "Content-Range": `bytes */${st.size}` }).end(); return; }
+      status = 206;
+    }
+    const headers: Record<string, string | number> = {
+      "content-type": "application/octet-stream",
+      "content-length": st.size === 0 ? 0 : end - start + 1,
+      "accept-ranges": "bytes",
+      "x-file-size": st.size,
+      "last-modified": st.mtime.toUTCString(),
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(abs))}`,
+    };
+    if (status === 206) headers["content-range"] = `bytes ${start}-${end}/${st.size}`;
+    res.writeHead(status, headers);
+    if (req.method === "HEAD" || st.size === 0) { res.end(); return; }
+    o.host.log(`↓ 下载 ${this.rel(abs)} ${status === 206 ? `[${start}-${end}]` : ""}(${st.size} 字节)`);
+    await new Promise<void>((ok) => {
+      const rs = fs.createReadStream(abs, { start, end });
+      rs.on("error", () => { res.destroy(); ok(); });
+      res.on("close", () => { rs.destroy(); ok(); });
+      rs.pipe(res);
+    });
+  }
 
   async start(): Promise<void> {
     if (this.server) return;
@@ -359,10 +448,11 @@ export class Bridge {
         // CORS for browser-based clients
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Headers", "*");
-        res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-        res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+        res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,PUT,POST,DELETE,OPTIONS");
+        res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, X-File-Size, Content-Range, Content-Length");
         if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
         if (url.pathname === "/health") { res.writeHead(200, { "content-type": "text/plain" }).end("ok"); return; }
+        if (url.pathname === this.dlPath || url.pathname === this.upPath) { await this.fileHttp(req, res, url); return; }
 
         const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
         const okPath = url.pathname === this.mcpPath || url.pathname === this.mcpPath + "/";
@@ -451,4 +541,11 @@ function killTree(pid?: number) {
     if (process.platform === "win32") spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
     else process.kill(pid, "SIGKILL");
   } catch { /* ignore */ }
+}
+
+function sha256(abs: string): Promise<string> {
+  return new Promise((ok, bad) => {
+    const h = crypto.createHash("sha256");
+    fs.createReadStream(abs).on("data", (c) => h.update(c)).on("end", () => ok(h.digest("hex"))).on("error", bad);
+  });
 }

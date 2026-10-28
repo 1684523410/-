@@ -68,6 +68,7 @@ async function main() {
   } else {
     base = `http://127.0.0.1:${port}`;
   }
+  bridge.publicBase = base.replace(/\/+$/, "");
   const url = `${base.replace(/\/+$/, "")}${bridge.mcpPath}`;
   log(`MCP 地址: ${url}`);
   send({ t: "url", url });
